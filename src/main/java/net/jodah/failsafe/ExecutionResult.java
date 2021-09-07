@@ -29,7 +29,7 @@ public class ExecutionResult {
   static final CompletableFuture<ExecutionResult> NULL_FUTURE = CompletableFuture.completedFuture(null);
 
   /** An execution that was completed with a non-result */
-  static final ExecutionResult NONE = new ExecutionResult(null, null, true, 0, true, true, true);
+  static final ExecutionResult NONE = new ExecutionResult(null, null, true, 0, true, true, true, false);
 
   /** The execution result, if any */
   private final Object result;
@@ -45,17 +45,23 @@ public class ExecutionResult {
   private final boolean success;
   /** Whether all policies determined the execution to be a success */
   private final Boolean successAll;
+  /** Whether the execution was explicitly recorded via AsyncExecution */
+  private final boolean asyncRecorded;
 
   /**
    * Records an initial execution result with {@code complete} true and {@code success} set to true if {@code failure}
    * is not null.
    */
   public ExecutionResult(Object result, Throwable failure) {
-    this(result, failure, false, 0, true, failure == null, failure == null);
+    this(result, failure, false, 0, true, failure == null, failure == null, false);
+  }
+
+  public ExecutionResult(Object result, Throwable failure, boolean asyncRecorded) {
+    this(result, failure, false, 0, true, failure == null, failure == null, asyncRecorded);
   }
 
   private ExecutionResult(Object result, Throwable failure, boolean nonResult, long waitNanos, boolean complete,
-    boolean success, Boolean successAll) {
+    boolean success, Boolean successAll, boolean asyncRecorded) {
     this.nonResult = nonResult;
     this.result = result;
     this.failure = failure;
@@ -63,20 +69,32 @@ public class ExecutionResult {
     this.complete = complete;
     this.success = success;
     this.successAll = successAll;
+    this.asyncRecorded = asyncRecorded;
   }
 
   /**
    * Returns an ExecutionResult with the {@code result} set, {@code complete} true and {@code success} true.
    */
   public static ExecutionResult success(Object result) {
-    return new ExecutionResult(result, null, false, 0, true, true, true);
+    return success(result, false);
+  }
+
+  /**
+   * Returns a an ExecutionResult with the {@code result} set, {@code complete} true and {@code success} true.
+   */
+  public static ExecutionResult success(Object result, boolean asyncRecorded) {
+    return new ExecutionResult(result, null, false, 0, true, true, true, asyncRecorded);
   }
 
   /**
    * Returns an ExecutionResult with the {@code failure} set, {@code complete} true and {@code success} false.
    */
   public static ExecutionResult failure(Throwable failure) {
-    return new ExecutionResult(null, failure, false, 0, true, false, false);
+    return failure(failure, false);
+  }
+
+  public static ExecutionResult failure(Throwable failure, boolean asyncRecorded) {
+    return new ExecutionResult(null, failure, false, 0, true, false, false, asyncRecorded);
   }
 
   public Object getResult() {
@@ -103,6 +121,10 @@ public class ExecutionResult {
     return success;
   }
 
+  public boolean isAsyncRecorded() {
+    return asyncRecorded;
+  }
+
   /**
    * Returns a copy of the ExecutionResult with a non-result, and complete and success set to true. Returns {@code this}
    * if {@link #success} and {@link #result} are unchanged.
@@ -110,7 +132,7 @@ public class ExecutionResult {
   ExecutionResult withNonResult() {
     return success && this.result == null && nonResult ?
       this :
-      new ExecutionResult(null, null, true, waitNanos, true, true, successAll);
+      new ExecutionResult(null, null, true, waitNanos, true, true, successAll, asyncRecorded);
   }
 
   /**
@@ -122,7 +144,7 @@ public class ExecutionResult {
     boolean unchangedNotNull = this.result != null && this.result.equals(result);
     return success && (unchangedNull || unchangedNotNull) ?
       this :
-      new ExecutionResult(result, null, nonResult, waitNanos, true, true, successAll);
+      new ExecutionResult(result, null, nonResult, waitNanos, true, true, successAll, asyncRecorded);
   }
 
   /**
@@ -131,14 +153,16 @@ public class ExecutionResult {
   ExecutionResult withNotComplete() {
     return !this.complete ?
       this :
-      new ExecutionResult(result, failure, nonResult, waitNanos, false, success, successAll);
+      new ExecutionResult(result, failure, nonResult, waitNanos, false, success, successAll, asyncRecorded);
   }
 
   /**
    * Returns a copy of the ExecutionResult with success value of {code false}.
    */
   ExecutionResult withFailure() {
-    return !this.success ? this : new ExecutionResult(result, failure, nonResult, waitNanos, complete, false, false);
+    return !this.success ?
+      this :
+      new ExecutionResult(result, failure, nonResult, waitNanos, complete, false, false, asyncRecorded);
   }
 
   /**
@@ -147,7 +171,7 @@ public class ExecutionResult {
   ExecutionResult withSuccess() {
     return this.complete && this.success ?
       this :
-      new ExecutionResult(result, failure, nonResult, waitNanos, true, true, successAll);
+      new ExecutionResult(result, failure, nonResult, waitNanos, true, true, successAll, asyncRecorded);
   }
 
   /**
@@ -156,7 +180,7 @@ public class ExecutionResult {
   public ExecutionResult withWaitNanos(long waitNanos) {
     return this.waitNanos == waitNanos ?
       this :
-      new ExecutionResult(result, failure, nonResult, waitNanos, complete, success, successAll);
+      new ExecutionResult(result, failure, nonResult, waitNanos, complete, success, successAll, asyncRecorded);
   }
 
   /**
@@ -166,7 +190,7 @@ public class ExecutionResult {
     return this.waitNanos == waitNanos && this.complete == complete && this.success == success ?
       this :
       new ExecutionResult(result, failure, nonResult, waitNanos, complete, success,
-        successAll == null ? success : success && successAll);
+        successAll == null ? success : success && successAll, asyncRecorded);
   }
 
   boolean getSuccessAll() {
@@ -177,7 +201,7 @@ public class ExecutionResult {
   public String toString() {
     return "ExecutionResult[" + "result=" + result + ", failure=" + failure + ", nonResult=" + nonResult
       + ", waitNanos=" + waitNanos + ", complete=" + complete + ", success=" + success + ", successAll=" + successAll
-      + ']';
+      + ", asyncRecorded=" + asyncRecorded + ']';
   }
 
   @Override

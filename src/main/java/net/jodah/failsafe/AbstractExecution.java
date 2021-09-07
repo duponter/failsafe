@@ -35,12 +35,10 @@ public abstract class AbstractExecution<R> extends ExecutionContext<R> {
   final List<PolicyExecutor<R, Policy<R>>> policyExecutors;
 
   // Internally mutable state
-  /* Whether the supplier is in progress */
+  /* Whether the inner supplier is in progress */
   volatile boolean inProgress;
   /* Whether the execution attempt has been recorded */
   volatile boolean attemptRecorded;
-  /* Whether a result has been post-executed */
-  volatile boolean resultHandled;
   /* Whether the execution can be interrupted */
   volatile boolean canInterrupt;
   /* Whether the execution has been internally interrupted */
@@ -80,8 +78,11 @@ public abstract class AbstractExecution<R> extends ExecutionContext<R> {
   void record(ExecutionResult result, boolean timeout) {
     Assert.state(!completed, "Execution has already been completed");
     if (!interrupted) {
+      //Assert.log("AbstractExecution recording "+result + " attemptRecorded:"+attemptRecorded + " inProgress:"+inProgress)  ;
+
       recordAttempt();
       if (inProgress) {
+        Assert.log(this, "recording result with inProgress="+inProgress+", attemptRecorded="+attemptRecorded);
         lastResult = (R) result.getResult();
         lastFailure = result.getFailure();
         executions.incrementAndGet();
@@ -89,6 +90,7 @@ public abstract class AbstractExecution<R> extends ExecutionContext<R> {
           inProgress = false;
       }
     }
+    Assert.log(this, "attempts="+attempts.get()+ ", executions="+executions.get());
   }
 
   /**
@@ -99,6 +101,7 @@ public abstract class AbstractExecution<R> extends ExecutionContext<R> {
     if (!attemptRecorded) {
       attempts.incrementAndGet();
       attemptRecorded = true;
+      Assert.log(this, "setting attemptRecorded="+attemptRecorded);
     }
   }
 
@@ -107,8 +110,9 @@ public abstract class AbstractExecution<R> extends ExecutionContext<R> {
     if (startTime == Duration.ZERO)
       startTime = attemptStartTime;
     inProgress = true;
+  //  new Exception().printStackTrace();
+    Assert.log(this, "preExecute setting inProgress=true, attemptRecorded=false");
     attemptRecorded = false;
-    resultHandled = false;
     cancelledIndex = 0;
     canInterrupt = true;
     interrupted = false;

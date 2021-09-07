@@ -65,7 +65,7 @@ public class AsyncExecutionTest {
   }
 
   public void testRetryForResult() {
-    // Given rpRetry for null
+    // Given retry for null
     exec = new AsyncExecution<>(scheduler, future, executorFor(new RetryPolicy<>().handleResult(null)));
     exec.inject(Functions.getPromise(ctx -> null, exec), true);
 
@@ -116,7 +116,7 @@ public class AsyncExecutionTest {
   }
 
   public void testRetryForThrowable() {
-    // Given rpRetry on IllegalArgumentException
+    // Given retry on IllegalArgumentException
     exec = new AsyncExecution<>(scheduler, future,
       executorFor(new RetryPolicy<>().handle(IllegalArgumentException.class)));
     exec.inject(Functions.getPromise(ctx -> null, exec), true);
@@ -162,7 +162,7 @@ public class AsyncExecutionTest {
   }
 
   public void testRetryForResultAndThrowable() {
-    // Given rpRetry for null
+    // Given retry for null
     exec = new AsyncExecution<>(scheduler, future,
       executorFor(new RetryPolicy<>().withMaxAttempts(10).handleResult(null)));
     exec.inject(Functions.getPromise(ctx -> null, exec), true);
@@ -237,20 +237,20 @@ public class AsyncExecutionTest {
     exec = new AsyncExecution<>(scheduler, future, executorFor(new RetryPolicy<>()));
     exec.complete();
     exec.preExecute();
-    exec.retryOn(e);
+    exec.recordFailure(e);
   }
 
   public void testCompleteOrRetry() {
-    // Given rpRetry on IllegalArgumentException
+    // Given retry on IllegalArgumentException
     exec = new AsyncExecution<>(scheduler, future, executorFor(new RetryPolicy<>()));
     exec.inject(Functions.getPromise(ctx -> null, exec), true);
 
     // When / Then
     exec.preExecute();
-    exec.completeOrHandle(null, e);
+    exec.record(null, e);
     assertFalse(exec.isComplete());
     exec.preExecute();
-    exec.completeOrHandle(null, null);
+    exec.record(null, null);
 
     // Then
     assertEquals(exec.getAttemptCount(), 2);

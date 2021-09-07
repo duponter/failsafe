@@ -15,12 +15,14 @@
  */
 package net.jodah.failsafe;
 
+import net.jodah.failsafe.internal.util.Assert;
 import net.jodah.failsafe.util.concurrent.Scheduler;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -38,18 +40,7 @@ class TimeoutExecutor<R> extends PolicyExecutor<R, Timeout<R>> {
 
   @Override
   protected boolean isFailure(ExecutionResult result) {
-    // Handle sync and async execution timeouts
-    boolean timeoutExceeded =
-      execution.isAsyncExecution() && execution.getElapsedAttemptTime().toNanos() >= policy.getTimeout().toNanos();
-    return timeoutExceeded || (!result.isNonResult() && result.getFailure() instanceof TimeoutExceededException);
-  }
-
-  @Override
-  protected ExecutionResult onFailure(ExecutionResult result) {
-    // Handle async execution timeouts
-    if (!(result.getFailure() instanceof TimeoutExceededException))
-      result = ExecutionResult.failure(new TimeoutExceededException(policy));
-    return result;
+    return !result.isNonResult() && result.getFailure() instanceof TimeoutExceededException;
   }
 
   /**
@@ -57,7 +48,7 @@ class TimeoutExecutor<R> extends PolicyExecutor<R, Timeout<R>> {
    * exceeded.
    */
   @Override
-  protected Supplier<ExecutionResult> supply(Supplier<ExecutionResult> supplier, Scheduler scheduler) {
+  protected Supplier<ExecutionResult> supply(Supplier<ExecutionResult> innerSupplier, Scheduler scheduler) {
     return () -> {
       // Coordinates a result between the timeout and execution threads
       AtomicReference<ExecutionResult> result = new AtomicReference<>();
@@ -89,8 +80,8 @@ class TimeoutExecutor<R> extends PolicyExecutor<R, Timeout<R>> {
         return postExecute(ExecutionResult.failure(t));
       }
 
-      // Propagate execution, cancel timeout future if not done, and handle result
-      if (result.compareAndSet(null, supplier.get()))
+      // Propagate execution, cancel timeout future if not done, and postExecute result
+      if (result.compareAndSet(null, innerSupplier.get()))
         timeoutFuture.cancel(false);
       return postExecute(result.get());
     };
@@ -102,37 +93,57 @@ class TimeoutExecutor<R> extends PolicyExecutor<R, Timeout<R>> {
    */
   @Override
   @SuppressWarnings("unchecked")
-  protected Supplier<CompletableFuture<ExecutionResult>> supplyAsync(
-    Supplier<CompletableFuture<ExecutionResult>> supplier, Scheduler scheduler, FailsafeFuture<R> future) {
-    return () -> {
-      // Coordinates a result between the timeout and execution threads
-      AtomicReference<ExecutionResult> executionResult = new AtomicReference<>();
+  protected Function<ExecutionRequest, CompletableFuture<ExecutionResult>> applyAsync(
+    Function<ExecutionRequest, CompletableFuture<ExecutionResult>> innerFn, Scheduler scheduler,
+    FailsafeFuture<R> future) {
+
+    return request -> {
+      // Coordinates a race between the timeout and execution threads
+      AtomicReference<ExecutionResult> resultRef = new AtomicReference<>();
+      AtomicReference<Future<R>> timeoutFutureRef = new AtomicReference<>();
       CompletableFuture<ExecutionResult> promise = new CompletableFuture<>();
-      AtomicReference<Future<R>> timeoutFuture = new AtomicReference<>();
 
-      // Schedule timeout if not an async execution
-      if (!execution.isAsyncExecution()) {
-        // Guard against race with future.complete or future.cancel
-        synchronized (future) {
-          if (!future.isDone()) {
+      /*
+      This implementation sets up a race between a timeout being triggered and the execution completing. Whichever
+      completes first will complete the promise. For async executions, another timeout can only be scheduled after the
+      previous timeout's future isDone.
+      */
+
+      // Guard against race with AsyncExecution.record, AsyncExecution.complete, future.complete or future.cancel
+      synchronized (future) {
+        if (!future.isDone()) {
+          Future<R> timeoutFuture;
+          boolean canScheduleTimeout = false;
+
+          // Clear any pending timeout
+          if (request.isExecuting()) {
+            canScheduleTimeout = true;
+            timeoutFuture = timeoutFutureRef.get();
+            if (timeoutFuture != null) {
+              timeoutFuture.cancel(false);
+              canScheduleTimeout = timeoutFuture.isDone();
+            }
+          }
+
+          // Schedule timeout if one is not already pending
+          if (canScheduleTimeout) {
             try {
-              // Schedule timeout check
-              timeoutFuture.set((Future<R>) Scheduler.DEFAULT.schedule(() -> {
-                ExecutionResult cancelResult = ExecutionResult.failure(new TimeoutExceededException(policy));
-
+              timeoutFuture = (Future<R>) Scheduler.DEFAULT.schedule(() -> {
                 // Guard against race with execution completion
-                if (executionResult.compareAndSet(null, cancelResult)) {
-                  boolean canInterrupt = policy.canInterrupt();
-                  if (canInterrupt)
-                    execution.record(executionResult.get(), true);
+                ExecutionResult cancelResult = ExecutionResult.failure(new TimeoutExceededException(policy));
+                if (resultRef.compareAndSet(null, cancelResult)) {
+                  Assert.log(TimeoutExecutor.this.getClass(), "timeout triggered before result");
+                  execution.record(cancelResult, true);
 
                   // Cancel and interrupt
                   execution.cancelledIndex = policyIndex;
-                  future.cancelDependencies(canInterrupt, cancelResult);
+                  future.cancelDependencies(policy.canInterrupt(), cancelResult);
                 }
+
                 return null;
-              }, policy.getTimeout().toNanos(), TimeUnit.NANOSECONDS));
-              future.injectTimeout(timeoutFuture.get());
+              }, policy.getTimeout().toNanos(), TimeUnit.NANOSECONDS);
+              timeoutFutureRef.set(timeoutFuture);
+              future.injectTimeout(timeoutFuture);
             } catch (Throwable t) {
               // Hard scheduling failure
               promise.completeExceptionally(t);
@@ -142,27 +153,27 @@ class TimeoutExecutor<R> extends PolicyExecutor<R, Timeout<R>> {
         }
       }
 
-      // Propagate execution, cancel timeout future if not done, and handle result
-      supplier.get().whenComplete((result, error) -> {
-        if (executionResult.compareAndSet(null, result)) {
-          if (error != null) {
-            promise.completeExceptionally(error);
-            return;
-          }
-
-          // Cancel timeout task
-          Future<R> maybeFuture = timeoutFuture.get();
-          if (maybeFuture != null)
-            maybeFuture.cancel(false);
-        } else {
-          // Fetch timeout result
-          try {
-            result = executionResult.get();
-          } catch (Exception notPossible) {
-          }
+      // Propagate execution, cancel timeout future if not done, and postExecute result
+      innerFn.apply(request).whenComplete((result, error) -> {
+        if (error != null) {
+          promise.completeExceptionally(error);
+          return;
         }
 
-        postExecuteAsync(result, scheduler, future);
+        if (!execution.isAsyncExecution() && !resultRef.compareAndSet(null, result)) {
+          // Fetch timeout result
+          result = resultRef.get();
+        }
+
+        // Cancel timeout task
+        Future<R> timeoutFuture = timeoutFutureRef.get();
+        if (timeoutFuture != null && !timeoutFuture.isDone())
+          timeoutFuture.cancel(false);
+
+        // Post-execute results that are not async
+        if (!execution.isAsyncExecution() || (result != null && result.isAsyncRecorded()))
+          postExecuteAsync(result, scheduler, future);
+
         promise.complete(result);
       });
 

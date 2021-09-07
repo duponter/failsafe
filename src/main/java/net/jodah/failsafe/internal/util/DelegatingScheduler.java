@@ -144,6 +144,7 @@ public final class DelegatingScheduler implements Scheduler {
       } finally {
         if (isForkJoinPool) {
           synchronized (promise) {
+            Assert.log("DelegatingScheduler Releasing thread " + promise.forkJoinPoolThread.getName());
             promise.forkJoinPoolThread = null;
           }
         }

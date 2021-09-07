@@ -19,6 +19,7 @@ import net.jodah.failsafe.internal.EventListener;
 import net.jodah.failsafe.util.concurrent.Scheduler;
 
 import java.util.concurrent.*;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -40,9 +41,9 @@ class FallbackExecutor<R> extends PolicyExecutor<R, Fallback<R>> {
    */
   @Override
   @SuppressWarnings("unchecked")
-  protected Supplier<ExecutionResult> supply(Supplier<ExecutionResult> supplier, Scheduler scheduler) {
+  protected Supplier<ExecutionResult> supply(Supplier<ExecutionResult> innerSupplier, Scheduler scheduler) {
     return () -> {
-      ExecutionResult result = supplier.get();
+      ExecutionResult result = innerSupplier.get();
       if (executionCancelled())
         return result;
 
@@ -65,9 +66,11 @@ class FallbackExecutor<R> extends PolicyExecutor<R, Fallback<R>> {
    */
   @Override
   @SuppressWarnings("unchecked")
-  protected Supplier<CompletableFuture<ExecutionResult>> supplyAsync(
-    Supplier<CompletableFuture<ExecutionResult>> supplier, Scheduler scheduler, FailsafeFuture<R> future) {
-    return () -> supplier.get().thenCompose(result -> {
+  protected Function<ExecutionRequest, CompletableFuture<ExecutionResult>> applyAsync(
+    Function<ExecutionRequest, CompletableFuture<ExecutionResult>> innerFn, Scheduler scheduler,
+    FailsafeFuture<R> future) {
+
+    return request -> innerFn.apply(request).thenCompose(result -> {
       if (result == null || future.isDone())
         return ExecutionResult.NULL_FUTURE;
       if (executionCancelled())
@@ -97,13 +100,7 @@ class FallbackExecutor<R> extends PolicyExecutor<R, Fallback<R>> {
           callable.call();
         else {
           Future<?> scheduledFallback = scheduler.schedule(callable, 0, TimeUnit.NANOSECONDS);
-
-          // Propagate cancellation to the scheduled fallback and its promise
-          future.injectCancelFn((mayInterrupt, promiseResult) -> {
-            scheduledFallback.cancel(mayInterrupt);
-            if (executionCancelled())
-              promise.complete(promiseResult);
-          });
+          propagateCancellation(future, scheduledFallback, promise);
         }
       } catch (Throwable t) {
         // Hard scheduling failure

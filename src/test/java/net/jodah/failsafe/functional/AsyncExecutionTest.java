@@ -42,7 +42,7 @@ public class AsyncExecutionTest {
       runAsync(() -> {
         System.out.println("Executing");
         if (counter.getAndIncrement() < 3)
-          ex.retryOn(new IllegalStateException());
+          ex.recordFailure(new IllegalStateException());
         else
           ex.complete();
       });

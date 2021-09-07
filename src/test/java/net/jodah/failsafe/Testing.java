@@ -207,6 +207,10 @@ public class Testing {
     return withStats(retryPolicy, new Stats(), true);
   }
 
+  public static <T> Timeout<T> withLogs(Timeout<T> timeout) {
+    return withStats(timeout, new Stats(), true);
+  }
+
   public static <T> CircuitBreaker<T> withLogs(CircuitBreaker<T> circuitBreaker) {
     return withStats(circuitBreaker, new Stats(), true);
   }
@@ -241,6 +245,21 @@ public class Testing {
     withStats((FailurePolicy) retryPolicy, stats, withLogging);
     return retryPolicy;
   }
+
+  public static <T> Timeout<T> withStats(Timeout<T> timeout, Stats stats, boolean withLogging) {
+    return timeout.onSuccess(e -> {
+      stats.successCount++;
+      if (withLogging)
+        System.out.printf("%s success with attempts: %s, executions: %s%n", timeout.getClass().getSimpleName(),
+          e.getAttemptCount(), e.getExecutionCount());
+    }).onFailure(e -> {
+      stats.failureCount++;
+      if (withLogging)
+        System.out.printf("%s failure with attempts: %s, executions: %s%n", timeout.getClass().getSimpleName(),
+          e.getAttemptCount(), e.getExecutionCount());
+    });
+  }
+
 
   public static <T> CircuitBreaker<T> withStats(CircuitBreaker<T> circuitBreaker, Stats stats, boolean withLogging) {
     circuitBreaker.onOpen(() -> {

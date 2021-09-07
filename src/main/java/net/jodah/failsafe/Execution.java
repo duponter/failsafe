@@ -47,66 +47,12 @@ public class Execution<R> extends AbstractExecution<R> {
   }
 
   /**
-   * Records an execution and returns true if a retry can be performed for the {@code result}, else returns false and
-   * marks the execution as complete.
-   *
-   * @throws IllegalStateException if the execution is already complete
-   * @deprecated Use {@link #recordResult(Object)} instead
-   */
-  public boolean canRetryFor(R result) {
-    preExecute();
-    postExecute(new ExecutionResult(result, null));
-    return !completed;
-  }
-
-  /**
-   * Records an execution and returns true if a retry can be performed for the {@code result} or {@code failure}, else
-   * returns false and marks the execution as complete.
-   *
-   * @throws IllegalStateException if the execution is already complete
-   * @deprecated Use {@link #record(Object, Throwable)} instead
-   */
-  public boolean canRetryFor(R result, Throwable failure) {
-    preExecute();
-    postExecute(new ExecutionResult(result, failure));
-    return !completed;
-  }
-
-  /**
-   * Records an execution and returns true if a retry can be performed for the {@code failure}, else returns false and
-   * marks the execution as complete.
-   *
-   * @throws NullPointerException if {@code failure} is null
-   * @throws IllegalStateException if the execution is already complete
-   * @deprecated Use {@link #recordFailure(Throwable)} instead
-   */
-  public boolean canRetryOn(Throwable failure) {
-    Assert.notNull(failure, "failure");
-    preExecute();
-    postExecute(new ExecutionResult(null, failure));
-    return !completed;
-  }
-
-  /**
    * Records and completes the execution successfully.
    *
    * @throws IllegalStateException if the execution is already complete
    */
   public void complete() {
     postExecute(ExecutionResult.NONE);
-  }
-
-  /**
-   * Records and attempts to complete the execution with the {@code result}. Returns true on success, else false if
-   * completion failed and execution should be retried.
-   *
-   * @throws IllegalStateException if the execution is already complete
-   * @deprecated Use {@link #recordResult(Object)} instead
-   */
-  public boolean complete(R result) {
-    preExecute();
-    postExecute(new ExecutionResult(result, null));
-    return completed;
   }
 
   /**

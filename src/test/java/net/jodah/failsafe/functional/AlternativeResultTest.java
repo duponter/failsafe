@@ -51,45 +51,17 @@ public class AlternativeResultTest {
     }, CircuitBreakerOpenException.class);
   }
 
-  public void testRejectedAsyncExecutionWithRetry() {
+  public void testRejectedAsyncExecutionWithRecordFailure() {
     Stats rpStats = new Stats();
     Stats cbStats = new Stats();
     RetryPolicy<Object> rp = withStats(new RetryPolicy<>().withMaxAttempts(7), rpStats, true);
     CircuitBreaker<Object> cb = withStats(new CircuitBreaker<>().withFailureThreshold(3), cbStats, true);
 
-    // Test with retryOn()
+    // Test with recordFailure()
     testAsyncExecutionFailure(Failsafe.with(rp, cb), ex -> {
       runAsync(() -> {
         System.out.println("Executing");
-        ex.retryOn(new IllegalStateException());
-      });
-    }, e -> {
-      assertEquals(e.getAttemptCount(), 7);
-      assertEquals(e.getExecutionCount(), 3);
-      assertEquals(rpStats.failedAttemptCount, 7);
-      assertEquals(rpStats.retryCount, 6);
-      assertEquals(cb.getExecutionCount(), 3);
-      assertEquals(cb.getFailureCount(), 3);
-    }, CircuitBreakerOpenException.class);
-  }
-
-  @Test(enabled = false)
-  public void testRejectedAsyncExecutionWithCompleteAndRetry() {
-    Stats rpStats = new Stats();
-    Stats cbStats = new Stats();
-    RetryPolicy<Object> rp = withStats(new RetryPolicy<>().withMaxAttempts(7), rpStats, true);
-    CircuitBreaker<Object> cb = withStats(new CircuitBreaker<>().withFailureThreshold(3), cbStats, true);
-
-    // Test with complete() and retry()
-    rpStats.reset();
-    cbStats.reset();
-    cb.close();
-    testAsyncExecutionFailure(Failsafe.with(rp, cb), ex -> {
-      runAsync(() -> {
-        System.out.println("Executing");
-        if (!ex.complete(null, new IllegalStateException())) {
-          ex.retry();
-        }
+        ex.recordFailure(new IllegalStateException());
       });
     }, e -> {
       assertEquals(e.getAttemptCount(), 7);

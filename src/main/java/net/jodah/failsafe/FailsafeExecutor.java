@@ -15,6 +15,7 @@
  */
 package net.jodah.failsafe;
 
+import net.jodah.failsafe.PolicyExecutor.ExecutionRequest;
 import net.jodah.failsafe.event.ExecutionCompletedEvent;
 import net.jodah.failsafe.function.*;
 import net.jodah.failsafe.internal.EventListener;
@@ -231,7 +232,7 @@ public class FailsafeExecutor<R> extends PolicyListeners<FailsafeExecutor<R>, R>
    * @throws TimeoutExceededException if a configured {@link Timeout} is exceeded.
    * @throws CircuitBreakerOpenException if a configured {@link CircuitBreaker} is open.
    */
-  public void run(ContextualRunnable runnable) {
+  public void run(ContextualRunnable<Void> runnable) {
     this.<Void>call(execution -> toSupplier(runnable, execution));
   }
 
@@ -267,7 +268,7 @@ public class FailsafeExecutor<R> extends PolicyListeners<FailsafeExecutor<R>, R>
    * @throws NullPointerException if the {@code runnable} is null
    * @throws RejectedExecutionException if the {@code runnable} cannot be scheduled for execution
    */
-  public CompletableFuture<Void> runAsync(ContextualRunnable runnable) {
+  public CompletableFuture<Void> runAsync(ContextualRunnable<Void> runnable) {
     return callAsync(execution -> getPromise(toCtxSupplier(runnable), execution), false);
   }
 
@@ -416,17 +417,19 @@ public class FailsafeExecutor<R> extends PolicyListeners<FailsafeExecutor<R>, R>
    * </p>
    *
    * @param asyncExecution whether this is a detached, async execution that must be manually completed
-   * @throws NullPointerException if the {@code supplierFn} is null
-   * @throws RejectedExecutionException if the {@code supplierFn} cannot be scheduled for execution
+   * @throws NullPointerException if the {@code innerFn} is null
+   * @throws RejectedExecutionException if the {@code innerFn} cannot be scheduled for execution
    */
   @SuppressWarnings({ "unchecked", "rawtypes" })
   private <T> CompletableFuture<T> callAsync(
-    Function<AsyncExecution<T>, Supplier<CompletableFuture<ExecutionResult>>> supplierFn, boolean asyncExecution) {
+    Function<AsyncExecution<T>, Function<ExecutionRequest, CompletableFuture<ExecutionResult>>> innerFn,
+    boolean asyncExecution) {
+
     FailsafeFuture<T> future = new FailsafeFuture(this);
     AsyncExecution<T> execution = new AsyncExecution(scheduler, future, this);
     future.inject(execution);
-    execution.inject(supplierFn.apply(execution), asyncExecution);
-    execution.executeAsync(asyncExecution);
+    execution.inject(innerFn.apply(execution), asyncExecution);
+    execution.executeAsync();
     return future;
   }
 }
